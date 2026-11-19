@@ -2,8 +2,8 @@
  * while the Linux host builds the Windows game. No game code is included.
  *
  * Setup.sh compiles this file with FFNY_TOOLS_DIR and FFNY_PREFIX pointing to
- * this machine's Unix paths; FFNY_TOOLS_DIR / FFNY_PREFIX environment variables
- * override them at runtime. The game launches this bridge as
+ * this machine's Unix paths; FFNY_TOOLS_DIR / FFNY_PREFIX / WINEPREFIX
+ * environment variables override them at runtime. The game launches this bridge as
  * <install>\..\..\ffny-tools\wine-update-bridge.exe (installed by setup.sh).
  */
 #ifndef UNICODE
@@ -100,7 +100,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR ignored, int s
     wchar_t tools[4096], prefix[4096], python[8192], script[8192];
     wchar_t done[2048], cmd[16384] = L"";
     utf8_to_wide(env_or("FFNY_TOOLS_DIR", FFNY_TOOLS_DIR), tools, 4096);
-    utf8_to_wide(env_or("FFNY_PREFIX", FFNY_PREFIX), prefix, 4096);
+    /* The prefix the game actually runs in wins over the compile-time default:
+     * a fresh install can use any Wine prefix the player starts the setup in. */
+    const char *wineprefix = env_or("WINEPREFIX", "");
+    const char *configured = env_or("FFNY_PREFIX", FFNY_PREFIX);
+    utf8_to_wide(*wineprefix == '/' ? wineprefix : configured, prefix, 4096);
     if (!tools[0]) { LocalFree(argv); return 4; }
     swprintf(python, 8192, L"Z:%ls\\venv\\bin\\python", tools);
     for (wchar_t *p = python; *p; ++p) if (*p == L'/') *p = L'\\';

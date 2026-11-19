@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
-INSTALL_DIR="" PREFIX="" TOOLCHAIN="" SKIP_TOOLCHAIN=0
+INSTALL_DIR="" PREFIX="" TOOLCHAIN="" SKIP_TOOLCHAIN=0 TOOLS_DIR=""
 MINGW_URL="https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64.tar.xz"
 MINGW_DIR="llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64"
 
@@ -14,6 +14,9 @@ Uso: $0 [opciones]
 
   --install-dir DIR   carpeta "app" de FFNY Online (contiene installed.json).
                       Si se omite, se detecta desde Lutris.
+  --tools-dir DIR     prepara esa carpeta para una instalación DESDE CERO (sin juego
+                      instalado todavía); después ejecuta ahí el DefJamSetup del release
+                      wine-latest. No escribe config.json.
   --prefix DIR        wineprefix del juego (por defecto, el de Lutris/WINEPREFIX/~/.wine).
   --toolchain DIR     raíz de llvm-mingw ya descargada (si omites esto, se descarga).
   --skip-toolchain    no descargar llvm-mingw (debe existir en PATH o en --toolchain).
@@ -24,6 +27,7 @@ EOF
 while [ $# -gt 0 ]; do
     case "$1" in
         --install-dir) INSTALL_DIR=${2:?falta la ruta}; shift 2 ;;
+        --tools-dir) TOOLS_DIR=${2:?falta la ruta}; shift 2 ;;
         --prefix) PREFIX=${2:?falta la ruta}; shift 2 ;;
         --toolchain) TOOLCHAIN=${2:?falta la ruta}; shift 2 ;;
         --skip-toolchain) SKIP_TOOLCHAIN=1; shift ;;
@@ -32,7 +36,9 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -z "$INSTALL_DIR" ]; then
+if [ -n "$TOOLS_DIR" ]; then
+    TOOLS=$(mkdir -p "$TOOLS_DIR" && cd "$TOOLS_DIR" && pwd)
+elif [ -z "$INSTALL_DIR" ]; then
     for yml in "${XDG_DATA_HOME:-$HOME/.local/share}"/lutris/games/*.yml; do
         [ -f "$yml" ] || continue
         grep -q 'DefJamLauncher' "$yml" || continue
@@ -46,19 +52,22 @@ if [ -z "$INSTALL_DIR" ]; then
     done
 fi
 
-[ -n "$INSTALL_DIR" ] || {
-    echo "No encontré FFNY Online. Indica la carpeta: $0 --install-dir \".../FFNY Online/app\"" >&2
-    exit 1
-}
-APP=$(cd "$INSTALL_DIR" && pwd)
-[ -f "$APP/installed.json" ] || { echo "No existe $APP/installed.json (¿instalación incorrecta?)" >&2; exit 1; }
-PREFIX=${PREFIX:-${WINEPREFIX:-$HOME/.wine}}
-PREFIX=$(cd "$PREFIX" && pwd)
-[ -d "$PREFIX/dosdevices" ] || { echo "No parece un wineprefix: $PREFIX (falta dosdevices)" >&2; exit 1; }
+if [ -z "$TOOLS_DIR" ]; then
+    [ -n "$INSTALL_DIR" ] || {
+        echo "No encontré FFNY Online. Indica la carpeta: $0 --install-dir \".../FFNY Online/app\"" >&2
+        exit 1
+    }
+    APP=$(cd "$INSTALL_DIR" && pwd)
+    [ -f "$APP/installed.json" ] || { echo "No existe $APP/installed.json (¿instalación incorrecta?)" >&2; exit 1; }
+    PREFIX=${PREFIX:-${WINEPREFIX:-$HOME/.wine}}
+    PREFIX=$(cd "$PREFIX" && pwd)
+    [ -d "$PREFIX/dosdevices" ] || { echo "No parece un wineprefix: $PREFIX (falta dosdevices)" >&2; exit 1; }
+fi
 PYTHON=$(command -v python3 || true)
 [ -n "$PYTHON" ] || { echo "Falta python3" >&2; exit 1; }
 
-DATA=$("$PYTHON" - "$APP/installed.json" "$PREFIX" "$APP" <<'PYEOF' 2>/dev/null || true
+if [ -z "$TOOLS_DIR" ]; then
+    DATA=$("$PYTHON" - "$APP/installed.json" "$PREFIX" "$APP" <<'PYEOF' 2>/dev/null || true
 import json, os, sys
 from pathlib import Path
 receipt = json.load(open(sys.argv[1]))
@@ -70,19 +79,25 @@ else:
     print(app.parent / 'data')
 PYEOF
 )
-[ -n "$DATA" ] || DATA="$(dirname "$APP")/data"
-
-TOOLS=$(dirname "$(dirname "$APP")")/ffny-tools
+    [ -n "$DATA" ] || DATA="$(dirname "$APP")/data"
+    TOOLS=$(dirname "$(dirname "$APP")")/ffny-tools
+else
+    APP="" DATA=""
+fi
 mkdir -p "$TOOLS"
 for file in wine-update.py wine-update-bridge.c ffny-toolchain.cmake ffny-update; do
     [ "$REPO/$file" -ef "$TOOLS/$file" ] || cp -f "$REPO/$file" "$TOOLS/$file"
 done
 chmod +x "$TOOLS/ffny-update"
 
-echo "Instalación: $APP"
-echo "Datos:       $DATA"
-echo "Prefix:      $PREFIX"
-echo "Herramientas:$TOOLS (el juego busca aquí su puente de actualización)"
+if [ -n "$TOOLS_DIR" ]; then
+    echo "Herramientas:$TOOLS (preparadas para instalar desde cero)"
+else
+    echo "Instalación: $APP"
+    echo "Datos:       $DATA"
+    echo "Prefix:      $PREFIX"
+    echo "Herramientas:$TOOLS (el juego busca aquí su puente de actualización)"
+fi
 echo
 echo "Preparando Python y dependencias..."
 if [ ! -x "$TOOLS/venv/bin/python" ]; then
@@ -126,7 +141,8 @@ escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
     -DFFNY_TOOLS_DIR="\"$(escape "$TOOLS")\"" \
     -DFFNY_PREFIX="\"$(escape "$PREFIX")\"" -lshell32
 
-"$TOOLS/venv/bin/python" - "$TOOLS/config.json" "$APP" "$DATA" "$PREFIX" "$TOOLCHAIN" <<'PYEOF'
+if [ -z "$TOOLS_DIR" ]; then
+    "$TOOLS/venv/bin/python" - "$TOOLS/config.json" "$APP" "$DATA" "$PREFIX" "$TOOLCHAIN" <<'PYEOF'
 import json, sys
 path, app, data, prefix, toolchain = sys.argv[1:]
 config = {'install_dir': app, 'data_dir': data, 'prefix': prefix}
@@ -134,6 +150,7 @@ if toolchain:
     config['toolchain'] = toolchain
 open(path, 'w').write(json.dumps(config, indent=2) + '\n')
 PYEOF
+fi
 
 for tool in cmake ninja; do
     command -v "$tool" >/dev/null || {
@@ -142,8 +159,24 @@ for tool in cmake ninja; do
 done
 
 echo
-echo "Listo. Ya puedes actualizar el juego con:"
-echo "    $TOOLS/ffny-update"
-echo
-echo "El botón \"Actualizar\" del propio launcher también usará este puente."
-echo "Comandos: ffny-update [update|check|status|log]"
+if [ -n "$TOOLS_DIR" ]; then
+    echo "Listo para instalar desde cero. Descarga el último DefJamSetup del release"
+    echo "wine-latest (github.com/N4ML355/ffny-online/releases/tag/wine-latest) y:"
+    echo
+    echo "    1) copia el .exe dentro de $TOOLS"
+    echo "    2) ejecútalo con wine (WINEPREFIX el que quieras usar):"
+    echo "       wine \"$TOOLS/DefJamSetup-*.exe\" --silent \\"
+    echo "            --dump '/ruta/a/tu/dump' \\"
+    echo "            --install-dir 'C:\\Games\\FFNY Online\\app' \\"
+    echo "            --data-dir 'C:\\Games\\FFNY Online\\data'"
+    echo
+    echo "El puente se encuentra por estar el .exe en esta carpeta. Si lo dejas"
+    echo "en otro sitio, exporta FFNY_BRIDGE con la ruta Windows del .exe del puente."
+    echo "Al terminar, ejecuta ./setup.sh --install-dir ... para configurar ffny-update."
+else
+    echo "Listo. Ya puedes actualizar el juego con:"
+    echo "    $TOOLS/ffny-update"
+    echo
+    echo "El botón \"Actualizar\" del propio launcher también usará este puente."
+    echo "Comandos: ffny-update [update|check|status|log]"
+fi

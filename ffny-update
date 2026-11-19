@@ -98,7 +98,7 @@ update)
     cand=""
     while IFS= read -r d; do
         [ -f "$d/build-complete.json" ] || continue
-        b=$("$PY" -c "import json;print(json.load(open('$d/signed-release.json'))['build'])" 2>/dev/null || echo 0)
+        b=$("$PY" -c "import json;print(json.load(open('$d/wine-adapter.json'))['build'])" 2>/dev/null || echo 0)
         [ "$b" = "$latest" ] || continue
         if ! grep -Fq "$(basename "$d")" "$APP/installed.json"; then cand=$d; break; fi
     done < <(ls -td "$APP"/versions/linux-wine-* 2>/dev/null)
