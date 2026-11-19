@@ -501,7 +501,7 @@ class Update:
         verify_payload(candidate)
         atomic(candidate / 'signed-release.json', raw)
         self.prepare_candidate(candidate, data, release['build'])
-        fresh = self.prepare_data(candidate)
+        self.prepare_data(candidate)
         if self.args.prepare_only:
             self.event(f'Prepared candidate: {candidate}')
             return
@@ -546,7 +546,7 @@ class Update:
         self.event('Copying the verified Windows sources', 2)
         shutil.copytree(payload, candidate, dirs_exist_ok=True)
         self.prepare_candidate(candidate, data, build)
-        fresh = self.prepare_data(candidate)
+        self.prepare_data(candidate)
         if self.args.prepare_only:
             self.event(f'Prepared candidate: {candidate}')
             return
