@@ -1,0 +1,9 @@
+venv/
+toolchain/
+downloads/
+config.json
+*.exe
+*.log
+*.lock
+*.pending
+__pycache__/

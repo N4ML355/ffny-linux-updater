@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# FFNY Online (Linux/Wine) — actualizador de un solo comando.
+# Uso:
+#   ffny-update           actualiza al último build (20-60 min, en segundo plano)
+#   ffny-update check     solo verifica si hay update nueva
+#   ffny-update status    build instalado vs. oficial + progreso
+#   ffny-update log       sigue el log en vivo
+# Las rutas de la instalación vienen de ./config.json (lo escribe setup.sh).
+set -euo pipefail
+
+SELF=$(readlink -f "$0")
+TOOLS=$(dirname "$SELF")
+PY="$TOOLS/venv/bin/python"
+ADAPTER="$TOOLS/wine-update.py"
+CONFIG="$TOOLS/config.json"
+LOG="$TOOLS/ffny-update.log"
+
+die() { echo "$*" >&2; exit 1; }
+
+[ -x "$PY" ] || die "Falta el entorno Python en $TOOLS: ejecuta setup.sh primero."
+[ -f "$CONFIG" ] || die "Falta $CONFIG: ejecuta setup.sh primero."
+
+cfg() { "$PY" -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],"") or "")' "$CONFIG" "$1"; }
+
+APP=$(cfg install_dir)
+[ -n "$APP" ] || die "config.json no define install_dir: vuelve a ejecutar setup.sh."
+
+game_running() { pgrep -f 'defjam_recomp|DefJamLauncher' >/dev/null 2>&1; }
+adapter_running() { pgrep -f 'wine-update\.py' >/dev/null 2>&1; }
+latest_build() {
+    "$PY" "$ADAPTER" --check | sed -n 's/.*build \([0-9]*\).*/\1/p' | head -1
+}
+installed_build() { "$PY" - "$CONFIG" <<'PYEOF'
+import json, os, sys
+from pathlib import Path
+config = json.load(open(sys.argv[1]))
+prefix = Path(config.get('prefix') or os.environ.get('WINEPREFIX') or Path.home() / '.wine')
+install = Path(config['install_dir'])
+executable = json.load(open(install / 'installed.json'))['executable']
+path = executable
+if len(path) > 2 and path[1] == ':':
+    path = (Path(os.path.realpath(prefix / 'dosdevices' / (path[0].lower() + ':')))
+            / path[3:].replace('\\', '/'))
+version = Path(path).parent.parent / 'config' / 'remaster-version.txt'
+print(version.read_text().strip() if version.is_file() else '?')
+PYEOF
+}
+
+case "${1:-update}" in
+check)
+    if adapter_running; then
+        echo "Otra actualización está usando el adaptador ahora; no se puede verificar en paralelo."
+        echo "Progreso: $SELF status"
+        exit 0
+    fi
+    out=$("$PY" "$ADAPTER" --check 2>&1) || { echo "$out"; exit 1; }
+    echo "$out"
+    ;;
+log)
+    exec tail -n 50 -f "$LOG"
+    ;;
+status)
+    inst=$(installed_build || echo '?')
+    if adapter_running; then
+        official="?"
+        echo "Instalado: build $inst  |  Oficial: build ?"
+        echo "Actualización EN MARCHA (PID $(pgrep -f 'wine-update\.py' | head -1)):"
+        [ -f "$LOG" ] && tail -n 3 "$LOG" || true
+    else
+        echo "Instalado: build $inst  |  Oficial: build $(latest_build || echo '?')"
+        echo "Sin actualización en curso."
+    fi
+    ;;
+--worker)
+    # uso interno: reanuda un candidate (si se pasa ruta) y lo activa
+    cand="${2:-}"
+    if [ -n "$cand" ]; then
+        "$PY" "$ADAPTER" --resume-build "$cand"
+        "$PY" "$ADAPTER" --activate "$cand"
+    else
+        exec "$PY" "$ADAPTER"
+    fi
+    ;;
+update)
+    if game_running; then echo "El juego está abierto: ciérralo y vuelve a intentar."; exit 1; fi
+    if adapter_running; then
+        echo "Ya hay una actualización en marcha. Progreso: $SELF status"
+        exit 1
+    fi
+    latest=$(latest_build || true)
+    [ -n "$latest" ] || { echo "No se pudo contactar el servidor de actualizaciones."; exit 1; }
+    cur=$(installed_build || echo 0)
+    if [ "$cur" -ge "$latest" ] 2>/dev/null; then
+        echo "Ya tienes la versión más reciente (build $cur). No hay nada que hacer."
+        exit 0
+    fi
+    # candidato ya compilado de este mismo build y pendiente de activar (p.ej. si algo se cortó)
+    cand=""
+    while IFS= read -r d; do
+        [ -f "$d/build-complete.json" ] || continue
+        b=$("$PY" -c "import json;print(json.load(open('$d/signed-release.json'))['build'])" 2>/dev/null || echo 0)
+        [ "$b" = "$latest" ] || continue
+        if ! grep -Fq "$(basename "$d")" "$APP/installed.json"; then cand=$d; break; fi
+    done < <(ls -td "$APP"/versions/linux-wine-* 2>/dev/null)
+    if [ -n "$cand" ]; then
+        echo "Reanudando candidate ya compilado: $(basename "$cand")"
+        setsid nohup "$SELF" --worker "$cand" >"$LOG" 2>&1 < /dev/null &
+    else
+        setsid nohup "$SELF" --worker >"$LOG" 2>&1 < /dev/null &
+    fi
+    pid=$!
+    disown
+    echo "Actualización lanzada en segundo plano (PID $pid). Tarda 20-60 min."
+    echo "Progreso: $SELF status   |   Log en vivo: $SELF log"
+    ;;
+*)
+    echo "Uso: $(basename "$SELF") [update|check|status|log]"
+    exit 2
+    ;;
+esac
