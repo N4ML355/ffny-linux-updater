@@ -45,6 +45,10 @@ PUBLIC_KEY = bytes.fromhex(
     '6d60d26ef38562ee1e29b99dddca155d89f2a6a28a32c4559c78ea00d28e5c05')
 # Number of steps the setup's own progress files use (no HD textures).
 STEPS = 5
+# sys.executable is empty when Wine starts the venv interpreter (it cannot
+# inspect itself), so fall back to the venv the adapter lives in.
+PYTHON = sys.executable or (str(TOOLS / 'venv/bin/python')
+                            if (TOOLS / 'venv/bin/python').is_file() else 'python3')
 
 
 class CancelError(Exception):
@@ -562,10 +566,10 @@ class Update:
         source = candidate / 'source'
         self.cancelled()
         self.event('Analysing the game dump', 3)
-        self.run([sys.executable, '-B', 'scripts/pipeline.py', 'analyze', '--data', data, '--no-archive'], source)
+        self.run([PYTHON, '-B', 'scripts/pipeline.py', 'analyze', '--data', data, '--no-archive'], source)
         self.cancelled()
         self.event('Translating the game code', 3)
-        self.run([sys.executable, '-B', 'scripts/pipeline.py', 'recomp'], source)
+        self.run([PYTHON, '-B', 'scripts/pipeline.py', 'recomp'], source)
         self.cancelled()
         self.event('Compiling the Windows game on Linux', 4)
         common = '-DNTDDI_VERSION=0x0A00000B -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 '
@@ -603,7 +607,7 @@ class Update:
         for script, what in (('apt-patch.py', 'the ONLINE entry in the main menu'),
                              ('online-art.py', "the online screens' art")):
             try:
-                self.run([sys.executable, '-B', str(source / 'scripts' / script), '--data', self.data], source)
+                self.run([PYTHON, '-B', str(source / 'scripts' / script), '--data', self.data], source)
             except subprocess.CalledProcessError as error:
                 self.event(f'Could not prepare {what} ({error}); online play stays in the launcher')
 

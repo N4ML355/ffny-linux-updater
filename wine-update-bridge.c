@@ -28,7 +28,8 @@
 static int append(wchar_t *out, size_t cap, const wchar_t *arg) {
     size_t used = wcslen(out), slashes = 0;
     if (used + 4 >= cap) return 0;
-    out[used++] = L' '; out[used++] = L'"';
+    if (used) out[used++] = L' ';
+    out[used++] = L'"';
     for (; *arg; ++arg) {
         if (*arg == L'\\') { ++slashes; continue; }
         size_t n = slashes * (*arg == L'"' ? 2 : 1) + (*arg == L'"');
@@ -88,7 +89,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR ignored, int s
         swprintf(exe, 2048, L"%ls\\DefJamLauncher.exe", argv[3]);
         if (!append(cmd, 4096, exe)) return 4;
         STARTUPINFOW si = {sizeof(si)}; PROCESS_INFORMATION pi;
-        if (!CreateProcessW(exe, cmd + 1, NULL, NULL, FALSE, CREATE_NO_WINDOW,
+        if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW,
                             NULL, argv[3], &si, &pi)) return 4;
         CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
         LocalFree(argv); return 0;
@@ -121,7 +122,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR ignored, int s
     if (*echo) {
         FILE *file = _wfopen(done, L"w");
         if (file) { fprintf(file, "0\n"); fclose(file); }
-        echo_command(echo, cmd + 1);
+        echo_command(echo, cmd);
         LocalFree(argv);
         return 0;
     }

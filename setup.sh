@@ -150,6 +150,14 @@ if toolchain:
     config['toolchain'] = toolchain
 open(path, 'w').write(json.dumps(config, indent=2) + '\n')
 PYEOF
+elif [ -n "$TOOLCHAIN" ]; then
+    # Tools-dir mode has no installation yet, but the adapter needs the toolchain
+    # the next setup run will build with (install/data/prefix are added later).
+    "$TOOLS/venv/bin/python" - "$TOOLS/config.json" "$TOOLCHAIN" <<'PYEOF'
+import json, sys
+path, toolchain = sys.argv[1:]
+open(path, 'w').write(json.dumps({'toolchain': toolchain}, indent=2) + '\n')
+PYEOF
 fi
 
 for tool in cmake ninja; do

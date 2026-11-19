@@ -42,7 +42,8 @@ No se distribuye ningún archivo del juego: todo se descarga del servidor oficia
    ```
 
    `setup.sh` crea el venv, descarga llvm-mingw (~200 MB, una sola vez) y compila
-   `wine-update-bridge.exe`; en este modo no escribe `config.json`.
+   `wine-update-bridge.exe`; en este modo solo apunta el toolchain en `config.json`
+   (la instalación se añade al terminar, con `--install-dir`).
 
 2. Descarga el último `DefJamSetup-*.exe` del release **wine-latest** de
    <https://github.com/N4ML355/ffny-online/releases/tag/wine-latest> y cópialo
